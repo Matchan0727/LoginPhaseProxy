@@ -58,7 +58,7 @@ public class BackendInterceptor extends ChannelDuplexHandler {
                 }
 
                 if (session == null || session.frontendBridge == null) {
-                    logger.warn("[B][S->V][pass] LoginPluginMessage id={} channel={} reason=no-frontend-session",
+                    logger.debug("[B][S->V][pass] LoginPluginMessage id={} channel={} reason=no-frontend-session",
                             packet.getId(), packet.getChannel());
                     break; // Continue packet in pipeline
                 }
@@ -153,7 +153,7 @@ public class BackendInterceptor extends ChannelDuplexHandler {
         ProxyLoginSession currentSession = session;
 
         if (currentSession == null || currentSession.frontendBridge == null) {
-            logger.warn("[B][S->V][complete] backend login complete, but frontend session is missing; cannot flush");
+            logger.debug("[B][S->V][complete] backend login complete, but frontend session is missing; cannot flush");
         } else {
             if (currentSession.hasOutstandingLoginPluginMessageIds()) {
                 logger.warn("[B][S->V][complete] backend login complete with unanswered LoginPluginMessage ids {}; flushing anyway",
@@ -182,7 +182,11 @@ public class BackendInterceptor extends ChannelDuplexHandler {
         session = ProxyLoginSession.link(playerUUID, this);
 
         if (session == null) {
-            logger.warn("[B][V->S][link] no frontend session found for uuid={}", playerUUID);
+            if (com.caiostoduto.loginPhaseProxy.utils.BedrockUtils.isBedrockPlayer(playerUUID)) {
+                logger.debug("[B][V->S][link] no frontend session found for Bedrock player uuid={} (bypassed)", playerUUID);
+            } else {
+                logger.warn("[B][V->S][link] no frontend session found for uuid={}", playerUUID);
+            }
         } else {
             logger.debug("[B][V->S][link] linked backend session uuid={}", playerUUID);
         }

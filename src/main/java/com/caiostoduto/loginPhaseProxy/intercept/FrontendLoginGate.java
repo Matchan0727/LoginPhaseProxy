@@ -30,6 +30,7 @@ final class FrontendLoginGate {
     private ChannelHandlerContext ctx;
     private boolean pipelinePrepared;
     private boolean skipCleanupFlush;
+    private boolean isBypassed;
 
     private record PendingWrite(Object message, ChannelPromise promise) {}
 
@@ -62,6 +63,8 @@ final class FrontendLoginGate {
     }
 
     boolean clientAcknowledged() { return currentPhase == LoginPhase.ACKNOWLEDGED; }
+    
+    boolean isBypassed() { return isBypassed; }
 
     void buffer(Object msg, ChannelPromise promise) {
         pendingWrites.add(new PendingWrite(msg, promise));
@@ -140,6 +143,20 @@ final class FrontendLoginGate {
         });
     }
 
+    void bypass(ChannelHandlerContext ctx) {
+        this.isBypassed = true;
+        // Dump all buffered packets and disable features.
+        // We do this immediately since we are aborting the proxy login logic.
+        ctx.executor().execute(() -> {
+            PendingWrite pendingWrite;
+            while ((pendingWrite = pendingWrites.poll()) != null) {
+                ctx.write(pendingWrite.message(), pendingWrite.promise());
+            }
+            ctx.flush();
+            removeOwner();
+        });
+    }
+
     void cleanup() {
         writePendingPackets();
     }
@@ -172,7 +189,7 @@ final class FrontendLoginGate {
         PendingWrite pendingWrite;
         while ((pendingWrite = pendingWrites.poll()) != null) {
             ctx.write(pendingWrite.message(), pendingWrite.promise());
-            if (pendingWrite.message() instanceof SetCompressionPacket) {
+            if (pendingWrite.message() instanceof SetCompressionPacket && !isBypassed) {
                 ctx.flush();
                 restorePipeline();
             }

@@ -48,11 +48,16 @@ public class FrontendInterceptor extends ChannelDuplexHandler {
     }
 
     // -------------------------------------------------------------------------
-    // [C -> V]  inbound (client → Velocity)
+    // [C -> V]  inbound (client ↁEVelocity)
     // -------------------------------------------------------------------------
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+        if (loginGate.isBypassed()) {
+            super.channelRead(ctx, msg);
+            return;
+        }
+
         logger.debug("[F][C->V] {}", msg.getClass().getName());
 
         switch (msg) {
@@ -107,11 +112,16 @@ public class FrontendInterceptor extends ChannelDuplexHandler {
     }
 
     // -------------------------------------------------------------------------
-    // [V -> C]  outbound (Velocity → client)
+    // [V -> C]  outbound (Velocity ↁEclient)
     // -------------------------------------------------------------------------
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+        if (loginGate.isBypassed()) {
+            super.write(ctx, msg, promise);
+            return;
+        }
+
         logger.debug("[F][V->C] {} ({})", msg, ctx.pipeline().names());
 
         switch (msg) {
@@ -132,6 +142,13 @@ public class FrontendInterceptor extends ChannelDuplexHandler {
                 return; // Drop packet
             }
             case ServerLoginSuccessPacket serverLoginSuccessPacket -> {
+                if (com.caiostoduto.loginPhaseProxy.utils.BedrockUtils.isBedrockPlayer(serverLoginSuccessPacket.getUuid())) {
+                    logger.debug("[F][V->C][bypass] Bedrock player detected, bypassing LoginPhaseProxy");
+                    loginGate.buffer(msg, promise);
+                    loginGate.bypass(ctx);
+                    return;
+                }
+
                 if (loginGate.waitingLoginAcknowledgedPacket()) {
                     logger.debug("[F][C->V][pass] ServerLoginSuccessPacket reason=waiting-login-acknowledged");
                     break; // Continue packet in pipeline
@@ -166,7 +183,7 @@ public class FrontendInterceptor extends ChannelDuplexHandler {
                         Component reason = disconnect.getReason().getComponent();
                         ProtocolVersion version = loginGate.getClientProtocolVersion();
 
-                        // Encoder reads connection state to choose the packet id — flip first.
+                        // Encoder reads connection state to choose the packet id  Eflip first.
                         mc.setState(StateRegistry.CONFIG);
 
                         logger.debug("[F][V->C][fix] re-framed Disconnect LOGIN->CONFIG: {}", reason);
@@ -197,6 +214,7 @@ public class FrontendInterceptor extends ChannelDuplexHandler {
      * Flushes all buffered packets to the client channel in the correct order and post-handshake logic
      */
     public void backendLoginComplete() {
+        if (loginGate.isBypassed()) return;
         loginGate.flushAfterBackendLogin();
     }
 
@@ -205,6 +223,11 @@ public class FrontendInterceptor extends ChannelDuplexHandler {
      * Uses ctx.writeAndFlush so the full outbound pipeline (encryption, etc.) is applied.
      */
     public void writeLoginPluginMessage(LoginPluginMessagePacket packet) {
+        if (loginGate.isBypassed()) {
+            // Should not happen since sessions are not linked for bypassed players, but just in case
+            return;
+        }
+
         logger.debug("[B->F][relay] LoginPluginMessage id={} channel={}", packet.getId(), packet.getChannel());
 
         if (ctx == null) {
@@ -270,3 +293,4 @@ public class FrontendInterceptor extends ChannelDuplexHandler {
         return ctx.pipeline().context(ForgeConstants.SERVER_SUCCESS_LISTENER) != null;
     }
 }
+
